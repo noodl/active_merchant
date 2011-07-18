@@ -8,25 +8,25 @@ class PaypointMcpeTest < Test::Unit::TestCase
 
     @credit_card = credit_card
     @amount = 1000
-    
-    @options = { 
+
+    @options = {
       :order_id => '654321',
       :billing_address => address,
       :description => 'description of goods'
     }
   end
-  
+
   def test_required_parameters_on_init
     assert_raise(ArgumentError) { ActiveMerchant::Billing::PaypointMcpeGateway.new }
   end
-  
+
   def test_successful_purchase
     @gateway.expects(:ssl_post).returns(successful_purchase_response)
-    
+
     assert response = @gateway.purchase(@amount, @credit_card, @options)
     assert_instance_of Response, response
     assert_success response
-    
+
     # Replace with authorization number from the successful response
     assert_equal '12345678', response.authorization
     assert response.test?
@@ -34,29 +34,29 @@ class PaypointMcpeTest < Test::Unit::TestCase
 
   def test_unsuccessful_request
     @gateway.expects(:ssl_post).returns(failed_purchase_response)
-    
+
     assert response = @gateway.purchase(@amount, @credit_card, @options)
     assert_failure response
     assert response.test?
   end
-  
+
   def test_repeat_payment
     @gateway.expects(:ssl_post).returns(successful_purchase_response)
     assert response = @gateway.purchase(@amount, @credit_card, @options)
     assert_instance_of Response, response
     assert_success response
-    
+
     # Replace with authorization number from the successful response
     assert_equal '12345678', response.authorization
     assert response.test?
-    
+
     @gateway.expects(:ssl_post).returns(successful_purchase_response)
     assert response = @gateway.repeat(@amount, response.authorization, response.params["strSecurityToken"])
     assert_success response
   end
 
   private
-  
+
   def successful_purchase_response
     [
       ['intTestMode', '1'],
@@ -77,7 +77,7 @@ class PaypointMcpeTest < Test::Unit::TestCase
       ['strSecurityToken', 'abc']
     ].map { |pair| pair.join('=') }.join('&')
   end
-  
+
   # The exact details here aren't important as the test only looks at intStatus
   def failed_purchase_response
     [

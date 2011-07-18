@@ -4,12 +4,12 @@ class RemotePaypointMcpeTest < Test::Unit::TestCase
 
   def setup
     @gateway = PaypointMcpeGateway.new(fixtures(:paypoint_mcpe))
-    
+
     @amount = 1000
     @credit_card = credit_card('1234123412341234')
     @declined_card = credit_card('4000300011112220')
-    
-    @options = { 
+
+    @options = {
       :order_id => '1',
       :billing_address => address,
       :description => 'Store Purchase',
@@ -17,7 +17,7 @@ class RemotePaypointMcpeTest < Test::Unit::TestCase
       :ip => '1.2.3.4'
     }
   end
-  
+
   def test_successful_purchase
     assert response = @gateway.purchase(@amount, @credit_card, @options)
     assert_success response
@@ -30,7 +30,7 @@ class RemotePaypointMcpeTest < Test::Unit::TestCase
     # Urk, should this be declined due to funds rather than a duff card number?
     assert_equal 'The card number given is invalid.', response.message
   end
-  
+
   def test_currency_from_options_gets_used
     # setting the currency happens in private code so we test it by checking for failure at the gateway
     @options[:currency] = 'FOO'
@@ -38,12 +38,12 @@ class RemotePaypointMcpeTest < Test::Unit::TestCase
     assert_failure response
     assert_equal 'The currency specified in field strCurrency (FOO) is not supported.', response.message
   end
-  
+
   def test_repeat_payment
     assert response = @gateway.purchase(@amount, @credit_card, @options)
     assert_success response
     assert !response.params["strSecurityToken"].blank?
-    
+
     assert response = @gateway.repeat(@amount, response.authorization, response.params["strSecurityToken"])
     assert_success response
     assert response.message.blank? # we get nil here unlike successful purchases
