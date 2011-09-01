@@ -55,6 +55,9 @@ module ActiveMerchant #:nodoc:
 
       def credit(money, transaction_id, security_token, options = {})
 	post = {}
+        add_amount(post, money, options)
+        add_repeat_fields(post, transaction_id, security_token)
+	post['strDesc'] = options[:description] # add_invoice wants the cart id too
 	commit('REFUND', money, post)
       end
 
@@ -93,7 +96,7 @@ module ActiveMerchant #:nodoc:
 
       def add_amount(post, money, options)
         post[:fltAmount] = amount(money)
-        post[:strCurrency] = options[:currency] || currency(money)
+        post[:strCurrency] = options[:currency]
       end
 
       def add_repeat_fields(post, transaction_id, security_token)
@@ -155,7 +158,7 @@ module ActiveMerchant #:nodoc:
 	  response[:intStatus] == '1',
 	  response[:strMessage],
 	  response,
-          :authorization => response[:intTransID],
+          :authorization => response[:intTransID], # what is response.authorization?
           :test => response[:intTestMode] == '1'
         )
       end
