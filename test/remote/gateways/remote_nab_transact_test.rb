@@ -3,6 +3,7 @@ class RemoteNabTransactTest < Test::Unit::TestCase
 
   def setup
     @gateway = NabTransactGateway.new(fixtures(:nab_transact))
+    @card_acceptor_gateway = NabTransactGateway.new(fixtures(:nab_transact_card_acceptor))
 
     @amount = 200
     @credit_card = credit_card('4444333322221111')
@@ -28,6 +29,33 @@ class RemoteNabTransactTest < Test::Unit::TestCase
     assert_equal 'Approved', response.message
   end
 
+  # Unfortunately there is no "real" way to test the dynamic card acceptor,
+  # however the "Integration Guide - XML API for Payments" documentation states:
+  #   If enabled on your NAB Transact account, the Dynamic Card Acceptor details
+  #   will be accepted via metadata tags added to your XML request. Note that
+  #   permission for this feature must be enabled on your account or you will
+  #   receive a response of “555 – Permission denied”.
+  #
+  # I couldn't find any other reference to this error code, so we can set the
+  # fields on an account with the dynamic card acceptor feature disabled and
+  # ensure we get the error.
+  def test_successful_purchase_with_card_acceptor
+    card_acceptor_options = {
+      :merchant_name => 'ActiveMerchant',
+      :merchant_location => 'Melbourne'
+    }
+    card_acceptor_options.each do |key, value|
+      options = @options.merge({key => value})
+      assert response = @gateway.purchase(@amount, @credit_card, options)
+      assert_failure response
+      assert_equal 'Permission denied', response.message
+
+      assert response = @card_acceptor_gateway.purchase(@amount, @credit_card, options)
+      assert_success response
+      assert_equal 'Approved', response.message
+    end
+  end
+
   def test_unsuccessful_purchase_insufficient_funds
     #Any total not ending in 00/08/11/16
     failing_amount = 151 #Specifically tests 'Insufficient Funds'
@@ -48,6 +76,24 @@ class RemoteNabTransactTest < Test::Unit::TestCase
     assert response = @gateway.purchase(@amount, @declined_card, @options)
     assert_failure response
     assert_equal 'Invalid Credit Card Number', response.message
+  end
+
+  def test_successful_refund
+    assert response = @gateway.purchase(@amount, @credit_card, @options)
+    assert_success response
+    authorization = response.authorization
+    assert response = @gateway.refund(@amount, authorization)
+    assert_success response
+    assert_equal 'Approved', response.message
+  end
+
+  def test_failed_refund
+    assert response = @gateway.purchase(@amount, @credit_card, @options)
+    assert_success response
+    authorization = response.authorization
+    assert response = @gateway.refund(@amount+1, authorization)
+    assert_failure response
+    assert_equal 'Only $2.0 available for refund', response.message
   end
 
   def test_invalid_login

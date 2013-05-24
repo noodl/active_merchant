@@ -8,10 +8,12 @@ module ActiveMerchant #:nodoc:
       API_VERSION = 'xml-4.2'
       PERIODIC_API_VERSION = "spxml-4.2"
 
-      TEST_URL = 'https://transact.nab.com.au/test/xmlapi/payment'
-      LIVE_URL = 'https://transact.nab.com.au/live/xmlapi/payment'
-      TEST_PERIODIC_URL = "https://transact.nab.com.au/xmlapidemo/periodic"
-      LIVE_PERIODIC_URL = "https://transact.nab.com.au/xmlapi/periodic"
+      class_attribute :test_periodic_url, :live_periodic_url
+
+      self.test_url = 'https://transact.nab.com.au/test/xmlapi/payment'
+      self.live_url = 'https://transact.nab.com.au/live/xmlapi/payment'
+      self.test_periodic_url = 'https://transact.nab.com.au/xmlapidemo/periodic'
+      self.live_periodic_url = 'https://transact.nab.com.au/xmlapi/periodic'
 
       self.supported_countries = ['AU']
 
@@ -32,7 +34,7 @@ module ActiveMerchant #:nodoc:
       #Transactions currently accepted by NAB Transact XML API
       TRANSACTIONS = {
         :purchase => 0,         #Standard Payment
-        :credit => 4,           #Refund
+        :refund => 4,           #Refund
         :void => 6,             #Client Reversal (Void)
         :authorization => 10,   #Preauthorise
         :capture => 11          #Preauthorise Complete (Advice)
@@ -50,16 +52,11 @@ module ActiveMerchant #:nodoc:
 
       def initialize(options = {})
         requires!(options, :login, :password)
-        @options = options
         super
       end
 
-      def test?
-        @options[:test] || super
-      end
-
       def purchase(money, credit_card_or_stored_id, options = {})
-        if credit_card_or_stored_id.is_a?(ActiveMerchant::Billing::CreditCard)
+        if credit_card_or_stored_id.respond_to?(:number)
           #Credit card for instant payment
           commit :purchase, build_purchase_request(money, credit_card_or_stored_id, options)
         else
@@ -67,6 +64,10 @@ module ActiveMerchant #:nodoc:
           options[:billing_id] = credit_card_or_stored_id.to_s
           commit_periodic build_periodic_item(:trigger, money, nil, options)
         end
+      end
+
+      def refund(money, authorization, options = {})
+        commit :refund, build_reference_request(money, authorization)
       end
 
       def store(creditcard, options = {})
@@ -81,6 +82,15 @@ module ActiveMerchant #:nodoc:
 
       private
 
+      def add_metadata(xml, options)
+        if options[:merchant_name] || options[:merchant_location]
+          xml.tag! 'metadata' do
+            xml.tag! 'meta', :name => 'ca_name', :value => options[:merchant_name] if options[:merchant_name]
+            xml.tag! 'meta', :name => 'ca_location', :value => options[:merchant_location] if options[:merchant_location]
+          end
+        end
+      end
+
       def build_purchase_request(money, credit_card, options)
         xml = Builder::XmlMarkup.new
         xml.tag! 'amount', amount(money)
@@ -93,13 +103,28 @@ module ActiveMerchant #:nodoc:
           xml.tag! 'cvv', credit_card.verification_value if credit_card.verification_value?
         end
 
+        add_metadata(xml, options)
+
+        xml.target!
+      end
+
+      def build_reference_request(money, reference)
+        xml = Builder::XmlMarkup.new
+
+        transaction_id, order_id, preauth_id, original_amount = reference.split('*')
+
+        xml.tag! 'amount', (money ? amount(money) : original_amount)
+        xml.tag! 'currency', options[:currency] || currency(money)
+        xml.tag! 'txnID', transaction_id
+        xml.tag! 'purchaseOrderNo', order_id
+        xml.tag! 'preauthID', preauth_id
+
         xml.target!
       end
 
       #Generate payment request XML
       # - API is set to allow multiple Txn's but currentlu only allows one
       # - txnSource = 23 - (XML)
-
       def build_request(action, body)
         xml = Builder::XmlMarkup.new
         xml.instruct!
@@ -181,7 +206,7 @@ module ActiveMerchant #:nodoc:
       end
 
       def commit(action, request)
-        response = parse(ssl_post(test? ? TEST_URL : LIVE_URL, build_request(action, request)))
+        response = parse(ssl_post(test? ? self.test_url : self.live_url, build_request(action, request)))
 
         Response.new(success?(response), message_from(response), response,
           :test => test?,
@@ -190,7 +215,7 @@ module ActiveMerchant #:nodoc:
       end
 
       def commit_periodic(request)
-        response = parse(ssl_post(test? ? TEST_PERIODIC_URL : LIVE_PERIODIC_URL, build_periodic_request(request)))
+        response = parse(ssl_post(test? ? self.test_periodic_url : self.live_periodic_url, build_periodic_request(request)))
         Response.new(success?(response), message_from(response), response,
           :test => test?,
           :authorization => authorization_from(response)
@@ -202,7 +227,7 @@ module ActiveMerchant #:nodoc:
       end
 
       def authorization_from(response)
-        response[:txn_id]
+        [response[:txn_id], response[:purchase_order_no], response[:preauth_id], response[:amount]].join('*')
       end
 
       def message_from(response)

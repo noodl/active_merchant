@@ -1,9 +1,8 @@
-require 'rubygems'
-require 'json'
-
 require 'test_helper'
 
 class StripeTest < Test::Unit::TestCase
+  include CommStub
+
   def setup
     @gateway = StripeGateway.new(:login => 'login')
 
@@ -17,6 +16,25 @@ class StripeTest < Test::Unit::TestCase
     }
   end
 
+  def test_successful_authorization
+    @gateway.expects(:ssl_request).returns(successful_authorization_response)
+
+    assert response = @gateway.authorize(@amount, @credit_card, @options)
+    assert_instance_of Response, response
+    assert_success response
+
+    assert_equal 'ch_test_charge', response.authorization
+    assert response.test?
+  end
+
+  def test_successful_capture
+    @gateway.expects(:ssl_request).returns(successful_capture_response)
+
+    assert response = @gateway.capture(@amount, "ch_test_charge");
+    assert_success response
+    assert response.test?
+  end
+
   def test_successful_purchase
     @gateway.expects(:ssl_request).returns(successful_purchase_response)
 
@@ -27,16 +45,6 @@ class StripeTest < Test::Unit::TestCase
     # Replace with authorization number from the successful response
     assert_equal 'ch_test_charge', response.authorization
     assert response.test?
-  end
-
-  def test_authorize
-    @gateway.expects(:ssl_request).never
-    assert_raises(RuntimeError) { @gateway.authorize(@amount, @credit_card, @options) }
-  end
-
-  def test_capture
-    @gateway.expects(:ssl_request).never
-    assert_raises(RuntimeError) { @gateway.capture(nil, 'ch_test_charge') }
   end
 
   def test_successful_void
@@ -63,12 +71,23 @@ class StripeTest < Test::Unit::TestCase
     assert response.test?
   end
 
+  def test_successful_request_always_uses_live_mode_to_determine_test_request
+    @gateway.expects(:ssl_request).returns(successful_partially_refunded_response(:livemode => true))
+
+    assert response = @gateway.refund(@refund_amount, 'ch_test_charge')
+    assert_instance_of Response, response
+    assert_success response
+
+    assert !response.test?
+  end
+
   def test_unsuccessful_request
     @gateway.expects(:ssl_request).returns(failed_purchase_response)
 
     assert response = @gateway.purchase(@amount, @credit_card, @options)
     assert_failure response
-    assert response.test?
+    # unsuccessful request defaults to live
+    assert !response.test?
   end
 
   def test_invalid_raw_response
@@ -76,7 +95,7 @@ class StripeTest < Test::Unit::TestCase
 
     assert response = @gateway.purchase(@amount, @credit_card, @options)
     assert_failure response
-    assert_match /^Invalid response received from the Stripe API/, response.message
+    assert_match(/^Invalid response received from the Stripe API/, response.message)
   end
 
   def test_add_customer
@@ -91,10 +110,26 @@ class StripeTest < Test::Unit::TestCase
     assert !post[:customer]
   end
 
-  def test_add_customer_data
-    post = {}
-    @gateway.send(:add_customer_data, post, {:description => "a test customer"})
-    assert_equal "a test customer", post[:description]
+  def test_application_fee_is_submitted
+    stub_comms(:ssl_request) do
+      @gateway.purchase(@amount, @credit_card, @options.merge({:application_fee => 144}))
+    end.check_request do |method, endpoint, data, headers|
+      assert_match(/application_fee=144/, data)
+    end.respond_with(successful_purchase_response)
+  end
+
+  def test_client_data_submitted_with_purchase
+    stub_comms(:ssl_request) do
+      updated_options = @options.merge({:description => "a test customer",:browser_ip => "127.127.127.127", :user_agent => "some browser", :order_id => "42", :email => "foo@wonderfullyfakedomain.com", :referrer =>"http://www.shopify.com"})
+      @gateway.purchase(@amount,@credit_card,updated_options)
+    end.check_request do |method, endpoint, data, headers|
+      assert_match(/description=a\+test\+customer/, data)
+      assert_match(/ip=127\.127\.127\.127/, data)
+      assert_match(/user_agent=some\+browser/, data)
+      assert_match(/external_id=42/, data)
+      assert_match(/referrer=http\%3A\%2F\%2Fwww\.shopify\.com/, data)
+      assert_match(/payment_user_agent=Stripe\%2Fv1\+ActiveMerchantBindings\%2F\d+\.\d+\.\d+/, data)
+    end.respond_with(successful_purchase_response)
   end
 
   def test_add_address
@@ -105,6 +140,7 @@ class StripeTest < Test::Unit::TestCase
     assert_equal @options[:billing_address][:address1], post[:card][:address_line1]
     assert_equal @options[:billing_address][:address2], post[:card][:address_line2]
     assert_equal @options[:billing_address][:country], post[:card][:address_country]
+    assert_equal @options[:billing_address][:city], post[:card][:address_city]
   end
 
   def test_ensure_does_not_respond_to_credit
@@ -114,12 +150,6 @@ class StripeTest < Test::Unit::TestCase
   def test_gateway_without_credentials
     assert_raises ArgumentError do
       StripeGateway.new
-    end
-  end
-
-  def test_purchase_without_card_or_customer
-    assert_raises ArgumentError do
-      @gateway.purchase(@amount, nil)
     end
   end
 
@@ -133,7 +163,66 @@ class StripeTest < Test::Unit::TestCase
 
   private
 
-  # Place raw successful response from gateway here
+  def successful_authorization_response
+    <<-RESPONSE
+{
+  "id": "ch_test_charge",
+  "object": "charge",
+  "created": 1309131571,
+  "livemode": false,
+  "paid": true,
+  "amount": 400,
+  "currency": "usd",
+  "refunded": false,
+  "fee": 0,
+  "fee_details": [],
+  "card": {
+    "country": "US",
+    "exp_month": 9,
+    "exp_year": #{Time.now.year + 1},
+    "last4": "4242",
+    "object": "card",
+    "type": "Visa"
+  },
+  "captured": false,
+  "description": "ActiveMerchant Test Purchase",
+  "dispute": null,
+  "uncaptured": true,
+  "disputed": false
+}
+    RESPONSE
+  end
+
+  def successful_capture_response
+    <<-RESPONSE
+{
+  "id": "ch_test_charge",
+  "object": "charge",
+  "created": 1309131571,
+  "livemode": false,
+  "paid": true,
+  "amount": 400,
+  "currency": "usd",
+  "refunded": false,
+  "fee": 0,
+  "fee_details": [],
+  "card": {
+    "country": "US",
+    "exp_month": 9,
+    "exp_year": #{Time.now.year + 1},
+    "last4": "4242",
+    "object": "card",
+    "type": "Visa"
+  },
+  "captured": true,
+  "description": "ActiveMerchant Test Purchase",
+  "dispute": null,
+  "uncaptured": false,
+  "disputed": false
+}
+    RESPONSE
+  end
+
   def successful_purchase_response(refunded=false)
     <<-RESPONSE
 {
@@ -158,7 +247,8 @@ class StripeTest < Test::Unit::TestCase
     RESPONSE
   end
 
-  def successful_partially_refunded_response
+  def successful_partially_refunded_response(options = {})
+    options = {:livemode=>false}.merge!(options)
     <<-RESPONSE
 {
   "amount": 400,
@@ -167,7 +257,7 @@ class StripeTest < Test::Unit::TestCase
   "currency": "usd",
   "description": "Test Purchase",
   "id": "ch_test_charge",
-  "livemode": false,
+  "livemode": #{options[:livemode]},
   "object": "charge",
   "paid": true,
   "refunded": true,

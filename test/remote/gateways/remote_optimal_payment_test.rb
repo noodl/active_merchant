@@ -11,11 +11,19 @@ class RemoteOptimalPaymentTest < Test::Unit::TestCase
     @options = {
       :order_id => '1',
       :billing_address => address,
-      :description => 'Basic Subscription'
+      :description => 'Basic Subscription',
+      :email => 'email@example.com'
     }
   end
 
   def test_successful_purchase
+    assert response = @gateway.purchase(@amount, @credit_card, @options)
+    assert_success response
+    assert_equal 'no_error', response.message
+  end
+
+  def test_unsuccessful_purchase_with_shipping_address
+    @options.merge!(:shipping_address => address)
     assert response = @gateway.purchase(@amount, @credit_card, @options)
     assert_success response
     assert_equal 'no_error', response.message
@@ -43,7 +51,7 @@ class RemoteOptimalPaymentTest < Test::Unit::TestCase
       :year => Time.now.year + 1,
       :first_name => 'Longbob',
       :last_name => 'Longsen',
-      :type => 'visa'
+      :brand => 'visa'
     )
     assert response = @gateway.purchase(@amount, credit_card, options)
     assert_success response
