@@ -141,7 +141,7 @@ module ActiveMerchant #:nodoc:
         end
 
         post[:intCV2] = creditcard.verification_value
-        post[:strCardType] = creditcard.type.upcase
+        post[:strCardType] = creditcard.brand.upcase
       end
 
       def commit(action, money, parameters)
