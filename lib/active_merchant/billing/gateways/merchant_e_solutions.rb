@@ -55,7 +55,7 @@ module ActiveMerchant #:nodoc:
         commit('T', nil, post)
       end
 
-      def unstore(card_id)
+      def unstore(card_id, options = {})
         post = {}
         post[:client_reference_number] = options[:customer] if options.has_key?(:customer)
         post[:card_id] = card_id
@@ -99,7 +99,8 @@ module ActiveMerchant #:nodoc:
 
       def add_invoice(post, options)
         if options.has_key? :order_id
-          post[:invoice_number] = options[:order_id].to_s.gsub(/[^\w.]/, '')
+          order_id = options[:order_id].to_s.gsub(/[^\w.]/, '')
+          post[:invoice_number] = truncate(order_id, 17)
         end
       end
 
@@ -146,12 +147,6 @@ module ActiveMerchant #:nodoc:
           :cvv_result => response["cvv2_result"],
           :avs_result => { :code => response["avs_result"] }
         )
-      end
-
-      def expdate(creditcard)
-        year  = sprintf("%.4i", creditcard.year)
-        month = sprintf("%.2i", creditcard.month)
-        "#{month}#{year[-2..-1]}"
       end
 
       def message_from(response)

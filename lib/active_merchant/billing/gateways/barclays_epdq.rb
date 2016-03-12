@@ -9,7 +9,7 @@ module ActiveMerchant #:nodoc:
       self.supported_cardtypes = [:visa, :master, :american_express, :maestro, :switch ]
       self.money_format = :cents
       self.homepage_url = 'http://www.barclaycard.co.uk/business/accepting-payments/epdq-mpi/'
-      self.display_name = 'Barclays ePDQ'
+      self.display_name = 'Barclays ePDQ MPI'
 
       def initialize(options = {})
         requires!(options, :login, :password, :client_id)
@@ -63,7 +63,7 @@ module ActiveMerchant #:nodoc:
       # code returned by ePDQ
       def credit(money, creditcard_or_authorization, options = {})
         if creditcard_or_authorization.is_a?(String)
-          deprecated CREDIT_DEPRECATION_MESSAGE
+          ActiveMerchant.deprecated CREDIT_DEPRECATION_MESSAGE
           refund(money, creditcard_or_authorization, options)
         else
           credit_new_order(money, creditcard_or_authorization, options)
